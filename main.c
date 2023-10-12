@@ -11,6 +11,9 @@
 #define MAX_FILENAME_LENGTH 100
 #define MAX_FILES 100
 
+struct Header header;
+
+
 struct File {
     char filename[MAX_FILENAME_LENGTH];
     mode_t mode;
@@ -18,10 +21,44 @@ struct File {
     off_t start;
     off_t end;
 };
+struct Header{
+    struct File * fileList[MAX_FILES];
+};
+int createTarFile( const char *tarFileName){
+    int tarFile = open(tarFileName, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (tarFile == -1) {
+        perror("Error al crear el archivo empacado");
+        exit(1);
+    }
+    return tarFile;
+}
+void createHeader(int numFiles, const char *tarFileName, const char *fileNames[]){
+    //Meter una entrada del struct File x archivo en la lista de archivos de Header
+    for (int i=0;i<numFiles;i++) {
+        //Guardar File en la lista de Files del header
+        struct File newFile;//Este estruct se guarda en header.files
 
+    }
+}
+void createBody(){
 
-void createStar() {
+}
+/*
+    Funcion que crea un archivo tar con los archivos especificados
+    en fileNames. El nombre del archivo tar es tarFileName.
+    numFiles es la cantidad de archivos que se van a empacar.
+*/
+void createStar(int numFiles, const char *tarFileName, const char *fileNames[]) {
+    int tarFile = createTarFile(tarFileName);//Crear tar vacio
 
+    if (tarFile == -1) {
+        perror("Error al crear el archivo empacado");
+        exit(1);
+    }
+    //Se creo el .tar correctamente
+    createHeader(numFiles,tarFileName,fileNames);//Crear header con los datos de los archivos
+    createBody();//Guardar el contenido de los Files segun las posiciones de 
+    //la lista de files del header
 }
 
 
