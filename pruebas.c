@@ -37,7 +37,7 @@ void createTar(int numFiles, const char *tarFileName, const char *fileNames[]) {
         }
 
         struct File header;
-        header.filename = fileName
+        strncpy(header.filename, fileName, MAX_FILENAME_LENGTH);
         header.mode = fileStat.st_mode;
         header.size = fileStat.st_size;
         header.start_pos = currentPosition; // Registra la posición de inicio
