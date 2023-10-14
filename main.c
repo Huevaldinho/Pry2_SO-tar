@@ -25,38 +25,52 @@ struct Header{
 
 off_t currentPosition = 0; // Lleva un seguimiento de la posición actual en el archivo TAR
 
+
 /*
-    Funcion para crear archivo tar vacio.
-    tarFileName es el nombre del archivo tar que se creara.
-    retorna numero del archivo tar.
+    Funcion para abrir o crear un archivo.
+    fileName es el nombre del archivo que se va a abrir o crear.
+    Si el archivo no existe, se crea y se retorna el file descriptor.
+    Si el archivo existe, se abre y se retorna el file descriptor.
 */
-int createTarFile( const char *tarFileName){
-    int tarFile = open(tarFileName, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-    if (tarFile == -1) {
+int openFile(const char * fileName){
+    int fd = open(fileName, O_RDWR  | O_CREAT, 0666);
+    if (fd == -1) {
         perror("Error al crear el archivo empacado");
         exit(1);
     }
-    return tarFile;
+    return fd;
 }
+
+
+
 /*
     Funcion para guardar un archivo en el header.
     Por ahora solo se va a usar en createHeader
     CUIDADO: Solo guarda en posiciones NULL del array de Files.
 */
-void saveFileInHeader(struct File newFile){
-   //revisar contenido del header
-   for (int i = 0; i < MAX_FILES; i++) {
+void addFileToHeaderFileList(struct File newFile) {
+    for (int i = 0; i < MAX_FILES; i++) {
         if (header.fileList[i] == NULL) {
-            header.fileList[i] = &newFile;
+            header.fileList[i] = malloc(sizeof(struct File));
+            if (header.fileList[i] == NULL) {
+                perror("Error al asignar memoria para el nuevo archivo en el header");
+                exit(1);
+            }
+            // Copiar los datos del nuevo archivo en la posición libre del header
+            strcpy(header.fileList[i]->fileName, newFile.fileName);
+            header.fileList[i]->mode = newFile.mode;
+            header.fileList[i]->size = newFile.size;
+            header.fileList[i]->start = newFile.start;
+            header.fileList[i]->end = newFile.end;
             printf("Archivo: %s \t Size: %ld \t Start: %ld \t End: %ld\n", header.fileList[i]->fileName, header.fileList[i]->size, header.fileList[i]->start, header.fileList[i]->end);
             break;
-        }else continue;
+        }
     }
 }
-/*
+
+/*  
     Funcion para escribir el header en el tar.
     tarFile es el numero del archivo tar.
-    El tarFile debe estar abierto antes de llamar a esta funcion.
 */
 void writeHeaderToTar(int tarFile) {
     char headerBlock[sizeof(header)];//Donde se guarda el contenido del header para escribirlo en el tar
@@ -68,6 +82,40 @@ void writeHeaderToTar(int tarFile) {
     }else
         printf("Se escribio el Header correctamente\n");
 }
+/*  
+    Funcion para leer el Header del tar file.
+    tarFileName es el nombre del tar file.
+*/
+void readHeaderFromTar(int tarFile){
+    if (lseek(tarFile, 0, SEEK_SET) == -1) {
+        perror("Error al posicionar el puntero al principio del archivo");
+        close(tarFile);
+        exit(1);
+    }
+    
+    char headerBlock[sizeof(header)]; // Debe ser lo suficientemente grande para contener el encabezado
+    ssize_t bytesRead = read(tarFile, headerBlock, sizeof(headerBlock));
+    printf("Bytes read: %ld\n", bytesRead);
+
+    if (bytesRead < 0) {
+        perror("Error al leer el Header del archivo TAR");
+        exit(1);
+    } else if (bytesRead < sizeof(header)) {
+        fprintf(stderr, "No se pudo leer todo el Header del archivo TAR\n");
+        exit(1);
+    }
+
+    // Copia el contenido del bloque en la estructura 'header'
+    memcpy(&header, headerBlock, sizeof(header));
+    printf("\nLeyendo Header...\n");
+
+    for (int i = 0; i < MAX_FILES; i++) {
+        if (header.fileList[i] != NULL) {
+            printf("Archivo: %s \t Size: %ld \t Start: %ld \t End: %ld\n", header.fileList[i]->fileName, header.fileList[i]->size, header.fileList[i]->start, header.fileList[i]->end);
+        }
+    }
+}
+
 
 /*
     Funcion para crear el encabezado del tar.
@@ -76,11 +124,7 @@ void writeHeaderToTar(int tarFile) {
     fileNames es un arreglo con los nombres de los archivos que se van a empacar
 */
 void createHeader(int numFiles, const char *tarFileName, const char *fileNames[]){//!TODO
-    int tarFile = open(tarFileName, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-    if (tarFile == -1) {
-        perror("Error al crear el archivo empacado");
-        exit(1);
-    }
+    int tarFile = openFile(tarFileName);//Crear tar vacio
     const char * fileName;
     struct stat fileStat;
     struct File newFile;
@@ -102,10 +146,10 @@ void createHeader(int numFiles, const char *tarFileName, const char *fileNames[]
             newFile.start = currentPosition + 1;
         newFile.end = currentPosition + fileStat.st_size;
         currentPosition = newFile.end;
-        saveFileInHeader(newFile);
+        addFileToHeaderFileList(newFile);
     }
     writeHeaderToTar(tarFile);
-    printf("Header size: %ld\n", sizeof(header));
+    readHeaderFromTar(tarFile);
     close(tarFile);
 }
 void createBody(){//!TODO
@@ -118,7 +162,7 @@ void createBody(){//!TODO
     numFiles es la cantidad de archivos que se van a empacar.
 */
 void createStar(int numFiles, const char *tarFileName, const char *fileNames[]) {
-    int tarFile = createTarFile(tarFileName);//Crear tar vacio
+    int tarFile = openFile(tarFileName);//Crear tar vacio
     //Se creo el .tar correctamente
     createHeader(numFiles,tarFileName,fileNames);//Crear header con los datos de los archivos
     createBody();//Guardar el contenido de los Files segun las posiciones de 
@@ -130,12 +174,13 @@ void createStar(int numFiles, const char *tarFileName, const char *fileNames[]) 
     } else {
         perror("Error al obtener el tamaño del archivo");
     }
-    close(tarFile);
 }
 
 
 void listStar(const char * tarFileName) {
-    
+    int tarFile = openFile(tarFileName);
+    readHeaderFromTar(tarFile);
+    close(tarFile);
 }
 int main(int argc, char *argv[]) {//!Modificar forma de usar las opciones
 //Debe poder usarse combinacion de opciones
@@ -146,6 +191,8 @@ int main(int argc, char *argv[]) {//!Modificar forma de usar las opciones
 
     const char * opcion = argv[1];
     const char * archivoTar = argv[2];
+
+    listStar(archivoTar);
 
     if (strcmp(opcion, "-c") == 0) {
         if (argc < 4) {
