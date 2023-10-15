@@ -386,8 +386,8 @@ int deleteFile(const char * tarFileName,const char * fileNameTobeDeleted){
     printf("Nombre de archivo a borrar %s \t Start: %ld \t End: %ld\n",fileNameTobeDeleted,fileTobeDeleated.start,fileTobeDeleated.end);
 
     deleteFileContentFromBody(fileTobeDeleated);//Elimina archivo del body del tar.
-    deleteFileFromHeader(fileTobeDeleated);
-    writeHeaderToTar(tarFile);
+    deleteFileFromHeader(fileTobeDeleated);//Elimina el archivo del header.
+    writeHeaderToTar(tarFile);//Vuelve a escribir el header en el tar.
     close(tarFile);
     return 0;
 }
