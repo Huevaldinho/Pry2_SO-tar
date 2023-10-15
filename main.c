@@ -9,9 +9,6 @@
 #define MAX_FILENAME_LENGTH 100
 #define MAX_FILES 100
 
-struct Header header;
-
-
 struct File {
     char fileName[MAX_FILENAME_LENGTH];
     mode_t mode;
@@ -19,9 +16,19 @@ struct File {
     off_t start;
     off_t end;
 };
+
+struct BlankSpace{
+    off_t start;
+    off_t end;
+};
+
+struct BlankSpaces{
+    struct BlankSpace blankSpaceList[MAX_FILES];
+} blankSpaces;
+
 struct Header{
     struct File fileList[MAX_FILES];
-};
+} header;
 
 off_t currentPosition = 0; // Lleva un seguimiento de la posición actual en el archivo TAR
 
@@ -106,7 +113,6 @@ int readHeaderFromTar(int tarFile){
     }
     // Copia el contenido del bloque en la estructura 'header'
     memcpy(&header, headerBlock, sizeof(header));
-    
     return 1;
 }
 /*
@@ -116,6 +122,33 @@ void printHeader(){
     for (int i = 0; i < MAX_FILES; i++) {
         if (header.fileList[i].size !=  0) {
             printf("Archivo: %s \t Size: %ld \t Start: %ld \t End: %ld\n", header.fileList[i].fileName, header.fileList[i].size, header.fileList[i].start, header.fileList[i].end);
+        }
+    }
+}
+
+/*
+    Funcion para agregar un espacio vacio al BlankSpaceList.
+    blanckSpace es el espacio en blanco que se va a agregar a la esctructura.
+    retorna 1 si se agrega correctamente.
+    retorna 0 si no se agrega.
+*/
+int addBlanckSpace(struct BlankSpace blankSpace){
+    printf("Adding blank space to BlankSpaceList...\n");
+    for (int i = 0; i < MAX_FILES; i++) {
+        if (blankSpaces.blankSpaceList[i].start == 0) {//Posicion vacia
+            blankSpaces.blankSpaceList[i]= blankSpace;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void printBlankSpaces(){
+    printf("BlankSpaces: \n");
+     for (int i = 0; i < MAX_FILES; i++) {
+        if (blankSpaces.blankSpaceList[i].start != 0) {//Posicion vacia
+            printf("\tBlankSpace: Start: %ld \t End: %ld\n", blankSpaces.blankSpaceList[i].start, blankSpaces.blankSpaceList[i].end);
+            
         }
     }
 }
@@ -302,17 +335,14 @@ void deleteFileContentFromBody(struct File fileToBeDeleted){
     size_t bytesLeidos;
     long bytesPorCopiar = 0;
 
-    while ((bytesLeidos = fread(buffer, 1, sizeof(buffer), archivoOriginal)) > 0) {
-        if (posicion >= bytesPorCopiar && posicion < bytesPorCopiar + bytesLeidos) {
+    while ((bytesLeidos = fread(buffer, 1, sizeof(buffer), archivoOriginal)) > 0){
+        if (posicion >= bytesPorCopiar && posicion < bytesPorCopiar + bytesLeidos){
             // Dentro del bloque a eliminar
             size_t bytesHastaPosicion = posicion - bytesPorCopiar;
-            if (bytesHastaPosicion > 0) {
+            if (bytesHastaPosicion > 0)//Copia lo que esta antes del "bloque" a eliminar
                 fwrite(buffer, 1, bytesHastaPosicion, archivoTemporal);
-            }
-        } else {
-            // Fuera del bloque a eliminar
+        }else// Fuera del bloque a eliminar
             fwrite(buffer, 1, bytesLeidos, archivoTemporal);
-        }
         bytesPorCopiar += bytesLeidos;
     }
 
@@ -322,6 +352,13 @@ void deleteFileContentFromBody(struct File fileToBeDeleted){
     // Reemplaza el archivo original con el archivo temporal
     remove(fileToBeDeleted.fileName);
     rename(nombreTemporal, fileToBeDeleted.fileName);
+
+    //Agregar espacio disponible al BlankSpaceList
+    struct BlankSpace blanckSpace;
+    blanckSpace.start = fileToBeDeleted.start;
+    blanckSpace.end = fileToBeDeleted.end;
+    addBlanckSpace(blanckSpace);//Agrega espacio en blanco a la escructura en MEMORIA.
+    printBlankSpaces();
 }
 
 /*
