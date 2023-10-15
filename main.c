@@ -33,6 +33,16 @@ struct BlankSpace{
 off_t currentPosition = 0; // Lleva un seguimiento de la posición actual en el archivo TAR
 
 
+int counterFiles(const char* files[]) {
+    int contador = 0;
+    // Recorre el arreglo hasta encontrar un puntero nulo (NULL)
+    while (files[contador] != NULL) {
+        contador++;
+    }
+    return contador;
+}
+
+
 /*
     Funcion para abrir o crear un archivo.
     fileName es el nombre del archivo que se va a abrir o crear.
@@ -115,6 +125,31 @@ int readHeaderFromTar(int tarFile){
     memcpy(&header, headerBlock, sizeof(header));
     return 1;
 }
+
+/*
+    Funcion para encontrar la posicion de un archivo en el tar.
+    Retorna NULL si no encuentra el archivo en el tar.
+    Retorna el archivo encontrado la lista de archivos del header.
+*/
+struct File findFile(const char * tarFileName,const char * fileName){
+    int tarFile = openFile(tarFileName,0);
+    if (readHeaderFromTar(tarFile)==1){
+        for (int i = 0; i < MAX_FILES; i++) {
+            if (strcmp(header.fileList[i].fileName,fileName)==0){//Encontro el archivo
+                close(tarFile);
+                return header.fileList[i];
+            }
+        }
+    }else{
+        printf("findFile: Error 1 al leer el header del tar file\n");
+        close(tarFile);
+        exit(10);
+    }
+    close(tarFile);
+    printf("findFile: Error 2 al leer el header del tar file\n");
+    exit(11);
+}
+
 /*
     Funcion para imprimir el header.
 */
@@ -183,27 +218,71 @@ void writeHeaderToTar(int tarFile) {
 }
 
 /*
+    Funcion para escribir el contenido de un archivo en el tar.
+    tarFileName es el nombre del archivo tar.
+    fileName es el nombre del archivo del cual se grabara el contenido en el body del tar.
+*/
+void writeFileContentToTar(const char * tarFileName,const char * fileName){
+    printf("\tArchivo a escribirse: %s\n" , fileName);
+    
+    int file = openFile(fileName,0);//Abre el archivo que se va a escribir en el tar
+    struct File fileInfo = findFile(tarFileName,fileName);//Encuentra el archivo en el header
+    char buffer[fileInfo.size];//Buffer para guardar el contenido del archivo a guardar
+    read(file,buffer, sizeof(buffer));//Lee el contenido del archivo y lo guarda en el buffer
+
+    
+    int tarFile = openFile(tarFileName,0);
+    
+    lseek(tarFile, fileInfo.start, SEEK_SET);//Coloca el puntero del tar donde de escribir.
+    if (write(tarFile, buffer, sizeof(buffer)) == -1) {
+        perror("writeFileContentToTar: Error al escribir en el archivo");
+        close(tarFile);
+        exit(1);
+    }
+    close(file);
+    close(tarFile);
+}
+
+
+/*
     Funcion para escribir el contenido de los archivos
     que se encuentra en el header del tar.
     tarFile es el numero del archivo. Debe estar abierto en modo escritura.
+    fileName es el nombre del archivo del cual se grabara el contenido en el body del tar.
 */
-void writeBodyToTar(int tarFile){
+void writeBodyToTar(const char * tarFileName,const char * fileNames[]){
     printf("writeBodyToTar: Writing Body to .tar \n");
-    for (int i = 0; i < MAX_FILES; i++) {
-        //Hay un file en esa posicion del header.
-        //Posicionar puntero en lugar de escritura
-        if ((header.fileList[i].size !=  0)&&(lseek(tarFile, header.fileList[i].start, SEEK_SET) != 0)){
-            // Mueve el puntero de archivo a 100 bytes desde el principio del archivo.
-            // Escribe el contenido del archivo en el archivo TAR
-            char buffer[header.fileList[i].size];//Buffer para guardar el contenido del archivo a guardar
-            read(tarFile,buffer, sizeof(buffer));//Lee el contenido del archivo y lo guarda en el buffer
-            if (write(tarFile, buffer, sizeof(buffer)) == -1) {
-                perror("writeBodyToTar: Error al escribir en el archivo");
-                close(tarFile);
-                exit(1);
-            }
-        }
+    int cantidadArchivos= counterFiles(fileNames);
+    printf("Cantidad de archivos a escribir: %d\n",cantidadArchivos);
+    for (int i=0;i<cantidadArchivos;i++){
+        printf("Archivo a escribir: %s\n",fileNames[i]);
+        struct stat fileStat;
+        if (lstat(fileNames[i], &fileStat) == -1) {//Extrae la info del archivo de esta iteracion y la guarda en fileStat
+            perror("writeBodyToTar: Error al obtener información del archivo. Se sale de la funcion.");
+            //exit(1);
+        }else
+            writeFileContentToTar(tarFileName,fileNames[i]);
     }
+}
+
+/*
+    Funcion encargada de escribir el cuerpo del tar.
+    tarFile es el numero del archivo tar.
+    El archivo tar debe estar abierto en modo lectura y escritura.
+*/
+void createBody(const char * tarFileName, const char *fileNames[]){
+    printf("createBody: Creating body...\n");
+    //Ver info del header para poder escribir el cuerpo
+    int tarFile = openFile(tarFileName,0);
+    if (readHeaderFromTar(tarFile)==1){
+        close(tarFile);
+        writeBodyToTar(tarFileName, fileNames);
+    }else{
+        printf("createBody: Error al leer el header del tar file\n");
+        close(tarFile);
+        exit(10);
+    }
+    close(tarFile);
 }
 
 /*
@@ -244,27 +323,6 @@ long createHeader(int numFiles,int tarFile, const char *fileNames[]){
 }
 
 /*
-    Funcion encargada de escribir el cuerpo del tar.
-    tarFile es el numero del archivo tar.
-    El archivo tar debe estar abierto en modo lectura y escritura.
-*/
-void createBody(const char * tarFileName){
-    printf("createBody: Creating body...\n");
-    //Ver info del header para poder escribir el cuerpo
-    int tarFile = openFile(tarFileName,0);
-    if (readHeaderFromTar(tarFile)==1){
-        close(tarFile);
-        tarFile = openFile(tarFileName,2);
-        writeBodyToTar(tarFile);
-    }else{
-        printf("createBody: Error al leer el header del tar file\n");
-        close(tarFile);
-        exit(10);
-    }
-    close(tarFile);
-}
-
-/*
     Funcion que crea un archivo tar con los archivos especificados
     en fileNames. El nombre del archivo tar es tarFileName.
     numFiles es la cantidad de archivos que se van a empacar.
@@ -281,31 +339,7 @@ void createStar(int numFiles, const char *tarFileName, const char *fileNames[]){
         printf("createStar: Se agrego espacio en blanco correctamente para el primer elemento\n");
     
     printBlankSpaces();
-    createBody(tarFileName);//Guardar el contenido de los Files segun las posiciones de 
-}
-
-/*
-    Funcion para encontrar la posicion de un archivo en el tar.
-    Retorna NULL si no encuentra el archivo en el tar.
-    Retorna la posicion de inicio en el tar si lo encuentra.
-*/
-struct File findFile(const char * tarFileName,const char * fileName){
-    int tarFile = openFile(tarFileName,0);
-    if (readHeaderFromTar(tarFile)==1){
-        for (int i = 0; i < MAX_FILES; i++) {
-            if (strcmp(header.fileList[i].fileName,fileName)==0){//Encontro el archivo
-                close(tarFile);
-                return header.fileList[i];
-            }
-        }
-    }else{
-        printf("findFile: Error 1 al leer el header del tar file\n");
-        close(tarFile);
-        exit(10);
-    }
-    close(tarFile);
-    printf("findFile: Error 2 al leer el header del tar file\n");
-    exit(11);
+    createBody(tarFileName,fileNames);//Guardar el contenido de los Files segun las posiciones de 
 }
 
 /*
@@ -328,44 +362,33 @@ int deleteFileFromHeader(struct File file){
 
 /*
     Funcion para eliminar el contenido de un archivo del body del tar.
+    tarFileName es el nombre del archivo tar.
     fileToBeDeleted es el archivo que se va a eliminar.
-    posicion es la posicion en el tar donde se encuentra el archivo.
+    NO se modifica el tamanno del archivo tar.
 */
-void deleteFileContentFromBody(struct File fileToBeDeleted){
-    const char * nombreTemporal = "temporal.txt";
-
-    off_t posicion = fileToBeDeleted.start;
-    FILE *archivoOriginal = fopen(fileToBeDeleted.fileName, "rb");
-    FILE *archivoTemporal =fopen(nombreTemporal, "wb");
-
-    if (archivoOriginal == NULL || archivoTemporal == NULL) {
-        perror("Error al abrir los archivos");
-        return;
+void deleteFileContentFromBody(const char* tarFileName,struct File fileToBeDeleted) {
+    FILE * archivo = fopen(tarFileName, "r+");
+    if (archivo == NULL) {
+        perror("deleteFileContentFromBody: Error al abrir el archivo");
+        exit(1);
     }
+    fseek(archivo, 0, SEEK_END);
+    char buffer[1024];
+    fseek(archivo, fileToBeDeleted.start, SEEK_SET); // Mueve el puntero al inicio del rango
 
-    // Copia los datos antes de la posición
-    char buffer[fileToBeDeleted.size];
-    size_t bytesLeidos;
-    long bytesPorCopiar = 0;
+    // Rellena el rango con caracteres nulos
+    size_t tamanoRango = fileToBeDeleted.end - fileToBeDeleted.start + 1;
+    memset(buffer, 0, sizeof(buffer)); // Puedes usar '\0' para caracteres nulos
 
-    while ((bytesLeidos = fread(buffer, 1, sizeof(buffer), archivoOriginal)) > 0){
-        if (posicion >= bytesPorCopiar && posicion < bytesPorCopiar + bytesLeidos){
-            // Dentro del bloque a eliminar
-            size_t bytesHastaPosicion = posicion - bytesPorCopiar;
-            if (bytesHastaPosicion > 0)//Copia lo que esta antes del "bloque" a eliminar
-                fwrite(buffer, 1, bytesHastaPosicion, archivoTemporal);
-        }else// Fuera del bloque a eliminar
-            fwrite(buffer, 1, bytesLeidos, archivoTemporal);
-        bytesPorCopiar += bytesLeidos;
+    while (tamanoRango > 0) {
+        size_t bytesAEscribir = tamanoRango < sizeof(buffer) ? tamanoRango : sizeof(buffer);
+        fwrite(buffer, 1, bytesAEscribir, archivo);
+        tamanoRango -= bytesAEscribir;
     }
+    printf("\n");
 
-    fclose(archivoOriginal);
-    fclose(archivoTemporal);
-
-    // Reemplaza el archivo original con el archivo temporal
-    remove(fileToBeDeleted.fileName);
-    rename(nombreTemporal, fileToBeDeleted.fileName);
-    //Agregar espacios disponibles
+    fseek(archivo, 0, SEEK_END);
+    fclose(archivo);
     addBlanckSpace(&firstBlankSpace,fileToBeDeleted.start,fileToBeDeleted.end);//Agrega espacio en blanco a la escructura en MEMORIA.
     printBlankSpaces();
 }
@@ -385,7 +408,7 @@ int deleteFile(const char * tarFileName,const char * fileNameTobeDeleted){
     }
     printf("Nombre de archivo a borrar %s \t Start: %ld \t End: %ld\n",fileNameTobeDeleted,fileTobeDeleated.start,fileTobeDeleated.end);
 
-    deleteFileContentFromBody(fileTobeDeleated);//Elimina archivo del body del tar.
+    deleteFileContentFromBody(tarFileName,fileTobeDeleated);//Elimina archivo del body del tar.
     deleteFileFromHeader(fileTobeDeleated);//Elimina el archivo del header.
     writeHeaderToTar(tarFile);//Vuelve a escribir el header en el tar.
     close(tarFile);
@@ -417,6 +440,32 @@ void listStar(const char * tarFileName) {
     printf("\n \t LIST TAR FILES \n");
     printHeader();
     close(tarFile);
+}
+
+/*
+    Funcion para calcular los espacios en blanco del tar.
+*/
+void calculateBlankSpaces(const char * tarFileName){//!DOING
+    printf("calculateBlankSpaces: Calculating BlankSpaces...\n");
+    int tarFile = openFile(tarFileName,0);
+    if (readHeaderFromTar(tarFile)==1){
+        close(tarFile);
+        //Calcular espacios en blanco. La diferencia de bytes entre los archivos debe ser mayor que 1.
+        //Se debe considerar el espacio entre el final del header y el primer archivo.
+        //Se debe considerar el espacio entre el final del ultimo archivo y el final del tar.
+        //Los 3 casos son: 
+        //                  Espacio entre final de header y primer archivo
+        //                  Espacio entre archivos
+        //                  Espacio entre ultimo archivo y final del tar
+        struct File fileActual;
+        
+    }else{
+        printf("calculateBlankSpaces: Error al leer el header del tar file\n");
+        close(tarFile);
+        exit(10);
+    }
+    
+    printBlankSpaces();
 }
 
 int main(int argc, char *argv[]) {//!Modificar forma de usar las opciones
