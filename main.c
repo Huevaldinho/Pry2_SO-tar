@@ -41,6 +41,7 @@ int openFile(const char * fileName,int opcion){
             perror("Error al crear el archivo empacado");
             exit(1);
         }
+        //printf("Se abre el archivo en opcion: 0 -> O_RDWR  | O_CREAT\n");
         return fd;
     }else if (opcion==1){//Crear archivo vacio
         fd = open(fileName, O_WRONLY | O_CREAT | O_TRUNC, 0666);
@@ -48,6 +49,15 @@ int openFile(const char * fileName,int opcion){
             perror("Error al crear el archivo empacado");
             exit(1);
         }
+        //printf("Se abre el archivo en opcion: 1 -> O_WRONLY | O_CREAT | O_TRUNC\n");
+        return fd;
+    }else if (opcion==2){//Extender el archivo (para el body)
+        fd = open(fileName, O_WRONLY | O_APPEND, 0666);
+        if (fd == -1) {
+            perror("Error al crear el archivo empacado");
+            exit(1);
+        }
+        //printf("Se abre el archivo en opcion: 2 -> O_WRONLY | O_APPEND\n");
         return fd;
     }else{
         printf("Opcion de creacion de archivo incorrecta...\n");
@@ -99,6 +109,9 @@ int readHeaderFromTar(int tarFile){
     
     return 1;
 }
+/*
+    Funcion para imprimir el header.
+*/
 void printHeader(){
     for (int i = 0; i < MAX_FILES; i++) {
         if (header.fileList[i].size !=  0) {
@@ -107,22 +120,9 @@ void printHeader(){
     }
 }
 
-/*
-    Funcion encargadad de leer el cuerpo del tar file.
-    Es decir, el contenido de los archivos que se encuentra en el tar.
-*/
-int readBodyFromTar(int tarFile){//TODO
-    if (readHeaderFromTar(tarFile)==1){//La cabecera
-
-    }
-}
-
-
-
-
 /*  
     Funcion para escribir el header en el tar.
-    tarFile es el numero del archivo tar.
+    tarFile es el numero del archivo tar. Debe estar abierto en modo escritura.
 */
 void writeHeaderToTar(int tarFile) {
     printf("writeHeaderToTar: Writing Header to .tar \n");
@@ -134,17 +134,18 @@ void writeHeaderToTar(int tarFile) {
         exit(1);
     }
 }
+
 /*
     Funcion para escribir el contenido de los archivos
     que se encuentra en el header del tar.
-    tarFile es el numero del archivo.
+    tarFile es el numero del archivo. Debe estar abierto en modo escritura.
 */
 void writeBodyToTar(int tarFile){
     printf("writeBodyToTar: Writing Body to .tar \n");
     for (int i = 0; i < MAX_FILES; i++) {
         //Hay un file en esa posicion del header.
         //Posicionar puntero en lugar de escritura
-        if ((header.fileList[i].size !=  0)&&(lseek(tarFile, header.fileList[i].start, SEEK_SET) == 0)){
+        if ((header.fileList[i].size !=  0)&&(lseek(tarFile, header.fileList[i].start, SEEK_SET) != 0)){
             // Mueve el puntero de archivo a 100 bytes desde el principio del archivo.
             // Escribe el contenido del archivo en el archivo TAR
             char buffer[header.fileList[i].size];//Buffer para guardar el contenido del archivo a guardar
@@ -188,24 +189,32 @@ void createHeader(int numFiles,int tarFile, const char *fileNames[]){
         currentPosition = newFile.end;
         addFileToHeaderFileList(newFile);
     }
+    printf("createHeader: Suma de tamaños de archivos + size of header: %ld\n", sumFileSizes+sizeof(header));
     writeHeaderToTar(tarFile);
     close(tarFile);//Necesito cerrar el archivo para poder volver a abrirlo en el modo lectura.
 }
+
 /*
     Funcion encargada de escribir el cuerpo del tar.
     tarFile es el numero del archivo tar.
     El archivo tar debe estar abierto en modo lectura y escritura.
 */
-void createBody(int tarFile){
-    //Ver info del header para poder graber cuerpo
+void createBody(const char * tarFileName){
+    printf("createBody: Creating body...\n");
+    //Ver info del header para poder escribir el cuerpo
+    int tarFile = openFile(tarFileName,0);
     if (readHeaderFromTar(tarFile)==1){
+        close(tarFile);
+        tarFile = openFile(tarFileName,2);
         writeBodyToTar(tarFile);
     }else{
         printf("createBody: Error al leer el header del tar file\n");
+        close(tarFile);
         exit(10);
     }
     close(tarFile);
 }
+
 /*
     Funcion que crea un archivo tar con los archivos especificados
     en fileNames. El nombre del archivo tar es tarFileName.
@@ -214,14 +223,19 @@ void createBody(int tarFile){
 void createStar(int numFiles, const char *tarFileName, const char *fileNames[]){
     printf("\n \t CREATE TAR FILE \n");
     createHeader(numFiles,openFile(tarFileName,1),fileNames);//Crear header con los datos de los archivos
-    createBody(openFile(tarFileName,0));//Guardar el contenido de los Files segun las posiciones de 
+    createBody(tarFileName);//Guardar el contenido de los Files segun las posiciones de 
 
-    struct stat st;//Para ver el tamaño del tar creado
-    if (fstat(openFile(tarFileName,0), &st) == 0) {
-        printf("\nEl tamaño del archivo tar es %lld bytes.\n", (long long)st.st_size);
-    } else {
-        perror("createStar: Error al obtener el tamaño del archivo");
+    // Usa la función lseek para mover el puntero al final del archivo
+    int tarFile = openFile(tarFileName,0);
+    off_t tamano = lseek(tarFile, 0, SEEK_END);
+
+    if (tamano == -1) {
+        perror("createStar: Error al obtener el tamaño del archivo tar.");
+        close(tarFile);
+        exit(1);
     }
+
+    printf("\nEl tamaño del archivo es: %ld bytes\n", (long)tamano);
 }
 
 /*
