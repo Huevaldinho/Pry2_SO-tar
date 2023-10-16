@@ -102,9 +102,11 @@ void addFileToHeaderFileList(struct File newFile) {
     Funcion para leer el Header del tar file.
     tarFile es el identificador del archivo tar de donde se debe leer el Header.
     retorna 1 si se leyo correctamente.
+    NO cierra el archivo tar.
 */
 int readHeaderFromTar(int tarFile){
-    printf("readHeaderFromTar: Reading Header from .tar \n");
+    printf("Reading Header from .tar \n");
+
     if (lseek(tarFile, 0, SEEK_SET) == -1) {
         perror("readHeaderFromTar: Error al posicionar el puntero al principio del archivo");
         close(tarFile);
@@ -162,11 +164,68 @@ void printHeader(){
 }
 
 /*
+    Funcion para obtener el primer archivo en la lista del header.
+    Retorna el primer archivo en la lista del header.
+    Si no hay elementos en la lista retorna estructura vacia.
+*/
+struct File findFirstFileInHeader(){
+    for (int i = 0; i < MAX_FILES; i++) 
+        if (header.fileList[i].size !=  0) 
+            return header.fileList[i];
+    return header.fileList[0];//Estructura vacia. No hay elementos en la lista.
+}
+/*
+    Funcion para obtener el ultimo archivo de la lista del header.
+    Retorna el ultimo archivo de la lista del header.
+    Si no hay elementos en la lista retorna estructura vacia.
+*/
+struct File findLastFileInHeader(){
+    for (int i = MAX_FILES-1; i >= 0; i--) 
+        if (header.fileList[i].size !=  0) 
+            return header.fileList[i];
+    return header.fileList[0];//Estructura vacia. No hay elementos en la lista.
+}
+/*
+    Funcion para saber si la lista de archivos del header esta vacia.
+    Retorna 0 si no esta vacia.
+    Retorna 1 si si esta vacia.
+*/
+int isHeaderFileListEmpty(){
+    for (int i = 0; i < MAX_FILES; i++) 
+        if (header.fileList[i].size !=  0) 
+            return 0;
+    return 1;
+}
+
+/*
+    Funcion para encontrar el archivo que sigue despues de file.
+    Retorna File con el archivo que sigue despues de file del parametro.
+*/
+struct File findNextFile(const char * file){
+    int indexFileActual;
+    for (int i = 0; i < MAX_FILES; i++){//Itero hasta encontrar el archivo file.
+        if (strcmp(header.fileList[i].fileName,file)==0){//Encontro el archivo
+            indexFileActual=i;//Guardo pos del archivo actual (file)
+            break;
+        }
+    }
+    //Continuo la busqueda del siguiente archivo
+    for (indexFileActual;indexFileActual<MAX_FILES;indexFileActual++){
+        if (header.fileList[indexFileActual].size!=0)//Este es el archivo que le sigue al file del parametro.
+            return header.fileList[indexFileActual];
+    }
+    printf("findNextFile: Error al encontrar el archivo siguiente\n");
+    exit(1);
+}
+
+/*
     Funcion para agregar un espacio vacio al BlankSpaceList.
-    blanckSpace es el espacio en blanco que se va a agregar a la esctructura.
+    cabeza primer elemento de la lista de espacios en blanco.
+    start es el inicio del espacio en blanco.
+    end es el final del espacio en blanco.  
     retorna 1 si se agrega correctamente.
 */
-int addBlanckSpace(struct BlankSpace** cabeza, off_t start, off_t end){
+int addBlankSpace(struct BlankSpace** cabeza, off_t start, off_t end){
     // Crear un nuevo nodo de BlankSpace
     struct BlankSpace* nuevoBlankSpace = (struct BlankSpace*)malloc(sizeof(struct BlankSpace));
     if (nuevoBlankSpace == NULL) {
@@ -187,8 +246,7 @@ int addBlanckSpace(struct BlankSpace** cabeza, off_t start, off_t end){
         while (actual->nextBlankSpace != NULL) {
             actual = actual->nextBlankSpace;
         }
-        // Agregar el nuevo nodo al final
-        actual->nextBlankSpace = nuevoBlankSpace;
+        actual->nextBlankSpace = nuevoBlankSpace;// Agregar el nuevo nodo al final
     }
     return 1;
 }
@@ -222,18 +280,14 @@ void writeHeaderToTar(int tarFile) {
     tarFileName es el nombre del archivo tar.
     fileName es el nombre del archivo del cual se grabara el contenido en el body del tar.
 */
-void writeFileContentToTar(const char * tarFileName,const char * fileName){
-    printf("\tArchivo a escribirse: %s\n" , fileName);
-    
+void writeFileContentToTar(const char * tarFileName,const char * fileName){    
     int file = openFile(fileName,0);//Abre el archivo que se va a escribir en el tar
     struct File fileInfo = findFile(tarFileName,fileName);//Encuentra el archivo en el header
     char buffer[fileInfo.size];//Buffer para guardar el contenido del archivo a guardar
     read(file,buffer, sizeof(buffer));//Lee el contenido del archivo y lo guarda en el buffer
-
-    
     int tarFile = openFile(tarFileName,0);
-    
     lseek(tarFile, fileInfo.start, SEEK_SET);//Coloca el puntero del tar donde de escribir.
+
     if (write(tarFile, buffer, sizeof(buffer)) == -1) {
         perror("writeFileContentToTar: Error al escribir en el archivo");
         close(tarFile);
@@ -321,6 +375,61 @@ long createHeader(int numFiles,int tarFile, const char *fileNames[]){
     close(tarFile);//Necesito cerrar el archivo para poder volver a abrirlo en el modo lectura.
     return sumFileSizes+sizeof(header);
 }
+/*
+    Funcion para calcular los espacios en blanco del tar.
+*/
+void calculateBlankSpaces(const char *tarFileName){
+    printf("\t\t\tCalculating BlankSpaces...\n");
+
+    int tarFile = openFile(tarFileName, 0);// Abre el archivo para leer el header.
+    off_t sizeOfTar = lseek(tarFile, 0, SEEK_END);// Obtiene el tamaño del archivo tar.
+    if (sizeOfTar == 0 ){
+        printf("calculateBlankSpaces: El archivo tar esta vacio\n");
+        close(tarFile);
+        return;
+    }
+    if (readHeaderFromTar(tarFile) != 1) {
+        printf("calculateBlankSpaces: Error al leer el header del tar file\n");
+        close(tarFile);
+        exit(10);
+    }
+    close(tarFile);
+    if (sizeOfTar == -1) {
+        perror("calculateBlankSpaces: Error al obtener el tamaño del archivo tar.");
+        exit(1);
+    }
+    if (isHeaderFileListEmpty()==1){//Lista de archivos del header vacia.
+        if (addBlankSpace(&firstBlankSpace,sizeof(header)+1,sizeOfTar)==1)
+            printf("Se agrego espacio en blanco entre el header y el fin del archivo.");
+    }else{//Lista de archivos del header tiene archivos.
+        struct File firstFile = findFirstFileInHeader();
+        struct File lastFile = findLastFileInHeader();
+        if (firstFile.start != sizeof(header)+1){//Si el primer archivo no empieza justo despues del header
+            if (addBlankSpace(&firstBlankSpace,sizeof(header)+1,firstFile.start-1)==1)
+                printf("Se agrego espacio en blanco entre el header y el primer archivo.");
+        }
+        else if (lastFile.end != sizeOfTar){//Si el ultimo archivo no termina justo al final del archivo tar
+            if (sizeOfTar-lastFile.end<=1)  
+                return;
+            if (addBlankSpace(&firstBlankSpace,lastFile.end+1,sizeOfTar)==1)
+                printf("Se agrego espacio en blanco entre el ultimo archivo y el fin del archivo.");
+        }else{//Espacio entre archivos
+            for (int i=0;i<MAX_FILES;i++){
+                //header.fileList[i].size  -> Hay un archivo.
+                // i+1 < MAX_FILES           -> No es el ultimo archivo.
+                if ((header.fileList[i].size !=  0) && (i+1<MAX_FILES)){
+                    //Buscar donde esta el siguiente archivo. Y sacar la diferencia.
+                    struct File nextFile = findNextFile(header.fileList[i].fileName);
+                    if (nextFile.start-header.fileList[i].end>1)
+                        if (addBlankSpace(&firstBlankSpace,header.fileList[i].end+1,nextFile.start-1)==1){
+                            printf("Se agrego espacio en blanco entre el archivo %s y el archivo %s.\n",header.fileList[i].fileName,nextFile.fileName);
+                        }
+                }
+            }
+        }
+    }
+    printBlankSpaces();
+}
 
 /*
     Funcion que crea un archivo tar con los archivos especificados
@@ -334,10 +443,7 @@ void createStar(int numFiles, const char *tarFileName, const char *fileNames[]){
         exit(1);
     }
     long sizeOfTar = createHeader(numFiles,openFile(tarFileName,1),fileNames);//Crear header con los datos de los archivos
-    //Agrega espacio en blanco (todo el cuerpo) a la escructura en MEMORIA.
-    if (addBlanckSpace(&firstBlankSpace,sizeof(header)+1,sizeOfTar)==1)
-        printf("createStar: Se agrego espacio en blanco correctamente para el primer elemento\n");
-    
+    calculateBlankSpaces(tarFileName);//Agrega espacio en blanco (todo el cuerpo) a la escructura en MEMORIA.
     printBlankSpaces();
     createBody(tarFileName,fileNames);//Guardar el contenido de los Files segun las posiciones de 
 }
@@ -389,9 +495,12 @@ void deleteFileContentFromBody(const char* tarFileName,struct File fileToBeDelet
 
     fseek(archivo, 0, SEEK_END);
     fclose(archivo);
-    addBlanckSpace(&firstBlankSpace,fileToBeDeleted.start,fileToBeDeleted.end);//Agrega espacio en blanco a la escructura en MEMORIA.
+    addBlankSpace(&firstBlankSpace,fileToBeDeleted.start,fileToBeDeleted.end);//Agrega espacio en blanco a la escructura en MEMORIA.
     printBlankSpaces();
 }
+
+
+
 
 /*
     Funcion encargada de eliminar un archivo del tar.
@@ -412,6 +521,7 @@ int deleteFile(const char * tarFileName,const char * fileNameTobeDeleted){
     deleteFileFromHeader(fileTobeDeleated);//Elimina el archivo del header.
     writeHeaderToTar(tarFile);//Vuelve a escribir el header en el tar.
     close(tarFile);
+    calculateBlankSpaces(tarFileName);
     return 0;
 }
 
@@ -442,31 +552,6 @@ void listStar(const char * tarFileName) {
     close(tarFile);
 }
 
-/*
-    Funcion para calcular los espacios en blanco del tar.
-*/
-void calculateBlankSpaces(const char * tarFileName){//!DOING
-    printf("calculateBlankSpaces: Calculating BlankSpaces...\n");
-    int tarFile = openFile(tarFileName,0);
-    if (readHeaderFromTar(tarFile)==1){
-        close(tarFile);
-        //Calcular espacios en blanco. La diferencia de bytes entre los archivos debe ser mayor que 1.
-        //Se debe considerar el espacio entre el final del header y el primer archivo.
-        //Se debe considerar el espacio entre el final del ultimo archivo y el final del tar.
-        //Los 3 casos son: 
-        //                  Espacio entre final de header y primer archivo
-        //                  Espacio entre archivos
-        //                  Espacio entre ultimo archivo y final del tar
-        struct File fileActual;
-        
-    }else{
-        printf("calculateBlankSpaces: Error al leer el header del tar file\n");
-        close(tarFile);
-        exit(10);
-    }
-    
-    printBlankSpaces();
-}
 
 int main(int argc, char *argv[]) {//!Modificar forma de usar las opciones
 //Debe poder usarse combinacion de opciones
@@ -477,6 +562,7 @@ int main(int argc, char *argv[]) {//!Modificar forma de usar las opciones
 
     const char * opcion = argv[1];
     const char * archivoTar = argv[2];
+
 
     if (strcmp(opcion, "-c") == 0) {
         if (argc < 4) {
