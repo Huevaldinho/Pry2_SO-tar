@@ -243,7 +243,7 @@ void printHeader(){
     printf("HEADER: \n");
     for (int i = 0; i < MAX_FILES; i++) {
         if (header.fileList[i].size !=  0) {
-            printf("\tArchivo: %s \t Size: %ld \t Start: %ld \t End: %ld\n", header.fileList[i].fileName, header.fileList[i].size, header.fileList[i].start, header.fileList[i].end);
+            printf("\tArchivo: %s \t Index:%i \t Size: %ld \t Start: %ld \t End: %ld\n", header.fileList[i].fileName,i, header.fileList[i].size, header.fileList[i].start, header.fileList[i].end);
         }
     }
 }
@@ -488,7 +488,7 @@ void createHeader(int numFiles,int tarFile, const char * fileNames[]){
 
 /*
     Funcion para calcular el espacio en blanco entre los archivos del tar.
-    !Al borrar el ultimo file, el tar crece en 1 byte. No se porque.
+    !ERROR: Si se borra el penultimo y luego el ultimo archivo se fusionan los campos.
 */
 void calculateSpaceBetweenFilesAux(struct File lastFile,off_t sizeOfTar,const char * tarFileName){
     struct File nextFile;
@@ -502,6 +502,10 @@ void calculateSpaceBetweenFilesAux(struct File lastFile,off_t sizeOfTar,const ch
                     addBlankSpace(&firstBlankSpace, header.fileList[i-1].end , sizeOfTar-1 , i );
             }else if (i==0){//Es el primer archivo
                 addBlankSpace(&firstBlankSpace, sizeof(header) + 1 , header.fileList[i+1].start , 0 );
+            }
+        }else{
+            if (i < MAX_FILES-1 && (header.fileList[i+1].size>0) && (header.fileList[i].end != header.fileList[i+1].start)){//No es el ultimo
+                addBlankSpace(&firstBlankSpace, header.fileList[i].end , header.fileList[i+1].start , i );
             }
         }
     }
@@ -665,8 +669,7 @@ struct BlankSpace * findBlankSpaceForNewFile(off_t sizeOfNewFile){
     Funcion para escribir contenido al final del archivo tar.
 */
 void writeAtTheEndOfTar(const char * tarFileName ,const char * fileName){
-    off_t sizeOftar = getFileSize(tarFileName);
-    int tarFile = openFile(tarFileName,2);//Archivo tar
+    int tarFile = openFile(tarFileName,0);//Archivo tar
     int file = openFile(fileName,0);//Archivo a guardar
     struct stat fileStat;
     if (lstat(fileName, &fileStat) == -1) {//Sacar info del archivo a guardar.
@@ -674,20 +677,18 @@ void writeAtTheEndOfTar(const char * tarFileName ,const char * fileName){
         exit(1);
     }
     struct File fileInfo;
+    struct File lastFile = findLastFileInHeader();
     strncpy(fileInfo.fileName,fileName,MAX_FILENAME_LENGTH);
     fileInfo.mode = fileStat.st_mode; 
     fileInfo.size = fileStat.st_size;
-    fileInfo.start = sizeOftar;  
-    fileInfo.end = sizeOftar + fileStat.st_size;
+    fileInfo.start = lastFile.end;  
+    fileInfo.end = lastFile.end+ fileStat.st_size;
     fileInfo.deleted = 0; 
-    //Tengo que actualizar el header tanto en ram como en el tar
     addFileToHeaderListInLastPosition(fileInfo);
     writeHeaderToTar(tarFile);
-    printHeader();
-
     char buffer[fileInfo.size];//Buffer para guardar el contenido del archivo a guardar
     read(file,buffer, sizeof(buffer));//Lee el contenido del archivo y lo guarda en el buffer
-    lseek(tarFile, 0, SEEK_END);//Coloca puntero del tar al final.
+    lseek(tarFile, fileInfo.start, SEEK_SET);//Coloca puntero del tar al final.
     if (write(tarFile, buffer, sizeof(buffer)) == -1) {
         perror("writeFileContentToTar: Error al escribir en el archivo");
         close(tarFile);
@@ -705,7 +706,7 @@ void writeAtTheEndOfTar(const char * tarFileName ,const char * fileName){
     Si aún así el nuevo contenido no cabe, se hace crecer el archivo empacado. 
     No debeutilizar ningún archivo auxiliar para hacer crecer el archivo.
 */
-void append(const char * tarFileName,const char * fileName){//!ERRORES de segmentacion en writeAtTheEndOfTar
+void append(const char * tarFileName,const char * fileName){
     printf("\n \t APPEND\n");
     if (sumFiles() >= MAX_FILES){
         printf("Cantidad maxima de archivos alcanzada.\n");
@@ -717,30 +718,28 @@ void append(const char * tarFileName,const char * fileName){//!ERRORES de segmen
         perror("append: Error al obtener información del archivo.\n");
         exit(1);
     }
-    printf("File a guardar: %s \t Size:%ld \n",fileName,fileStat.st_size);
     //Buscar espacio disponible para este file.
     struct BlankSpace * espacioDisponible = findBlankSpaceForNewFile(fileStat.st_size);
     if (espacioDisponible == NULL){//Si no encuentra, se agrega al final del archivo.
-        printf("Se debe agregar el file al final del tar (tar crece). \n");
         writeAtTheEndOfTar(tarFileName,fileName);
-    }else{//!Error: no se calcula el espacio entre archivos despues de agregar uno nuevo.
-        //Si se consigue el espacio correcto pero se pierden espacios en blanco
-        printf("Espacio disponible encontrado: Index=%i \t Start: %ld \t End: %ld \t Size: %ld\n",espacioDisponible->index,espacioDisponible->start,espacioDisponible->end,espacioDisponible->end-espacioDisponible->start);
+    }else{
         //Actualiza header.
         strncpy(header.fileList[espacioDisponible->index].fileName,fileName,MAX_FILENAME_LENGTH);
         header.fileList[espacioDisponible->index].deleted = 0;
         header.fileList[espacioDisponible->index].start = espacioDisponible->start;
         header.fileList[espacioDisponible->index].end = espacioDisponible->start + fileStat.st_size;
         header.fileList[espacioDisponible->index].size = fileStat.st_size;
-        
-        int tarFile= openFile(tarFileName,0);
+        int tarFile = openFile(tarFileName,0);
         writeHeaderToTar(tarFile);//Escribir el header en el tar
+        printf("Size of tar antes de guardar el contenido del archivo nuevo %ld \n",lseek(tarFile, 0, SEEK_END));
         close(tarFile);
         writeFileContentToTar(tarFileName,fileName);//Escribir contenido del archivo en el tar.
         //Borrar espacio en blanco de la lista
         deleteBlankSpace(espacioDisponible->index);
     }
-    
+    printf("Header despues del append.\n");
+    printHeader();
+    calculateBlankSpaces(tarFileName);    
 }
 int main(int argc, char *argv[]) {//!Modificar forma de usar las opciones
 //Debe poder usarse combinacion de opciones
