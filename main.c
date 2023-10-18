@@ -454,15 +454,6 @@ void calculateSpaceBetweenFilesAux(struct File lastFile,off_t sizeOfTar,const ch
 }
 
 /*
-    Funcion para calcular el espacio en blanco cuando el tar esta vacio.
-    sizeOfTar es el tamanno del archivo tar.
-*/
-void calculateSpaceInEmptyTar(off_t sizeOfTar){//*Falta probarla
-    //Espacio entre fin del header y fin del tar.
-    addBlankSpace(&firstBlankSpace, sizeof(header) + 1 , sizeOfTar , 0 );
-}
-
-/*
     Funcion para calcular los espacios en blanco del tar.
     Imprime los espacios en blanco cuando termina.
 */
