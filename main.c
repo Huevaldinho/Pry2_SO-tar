@@ -189,6 +189,31 @@ int readHeaderFromTar(int tarFile){
 }
 
 /*
+    Función para leer el contenido de un archivo en el tar.
+    Retorna el contenido en un buffer.
+    Si hay error, retorna NULL
+*/
+char* readContentFromTar(int tarFile, struct File fileToRead){
+    if(lseek(tarFile, fileToRead.start, SEEK_SET) == -1){
+        perror("readContentFromTar: Error al posicionar el puntero al principio del archivo a extraer.");
+        close(tarFile);
+        return NULL;
+    }
+
+    char* buffer = (char*)malloc(fileToRead.size); // To store content
+
+    if (read(tarFile, buffer, fileToRead.size) == -1){ // Reads content in 'buffer'
+        perror("Error al leer el contenido del archivo tar");
+        free(buffer);
+        close(tarFile);
+        return NULL;
+    }
+
+    close(tarFile);
+    return buffer;
+}
+
+/*
     Funcion para encontrar la posicion de un archivo en el tar.
     Retorna NULL si no encuentra el archivo en el tar.
     Retorna el archivo encontrado la lista de archivos del header.
@@ -243,7 +268,7 @@ void printHeader(){
     printf("HEADER: \n");
     for (int i = 0; i < MAX_FILES; i++) {
         if (header.fileList[i].size !=  0) {
-            printf("\tArchivo: %s \t Index:%i \t Size: %ld \t Start: %ld \t End: %ld\n", header.fileList[i].fileName,i, header.fileList[i].size, header.fileList[i].start, header.fileList[i].end);
+            printf("\tArchivo: %s \t Index:%i \t Size: %lld \t Start: %lld \t End: %lld\n", header.fileList[i].fileName,i, header.fileList[i].size, header.fileList[i].start, header.fileList[i].end);
         }
     }
 }
@@ -331,7 +356,7 @@ int addBlankSpace(struct BlankSpace** cabeza, off_t start, off_t end,int index){
         actual->nextBlankSpace = nuevoBlankSpace;
     }
     //Espacio en blanco agregado
-    printf("Se agrego espacio en blanco: Index=%i \t Start=%ld \t End=%ld\n",index,start,end);
+    printf("Se agrego espacio en blanco: Index=%i \t Start=%lld \t End=%lld\n",index,start,end);
     return 1;
 }
 /*
@@ -371,7 +396,7 @@ void printBlankSpaces(){
         return;
     }
     while (actual != NULL) {
-        printf("\tBlankSpace: Start: %ld \t End: %ld\n", actual->start, actual->end);
+        printf("\tBlankSpace: Start: %lld \t End: %lld\n", actual->start, actual->end);
         actual = actual->nextBlankSpace;
     }
 }
@@ -609,7 +634,7 @@ int deleteFile(const char * tarFileName,const char * fileNameTobeDeleted){
         printf("deleteFile: El archivo no se encuentra en el tar file\n");
         exit(11);
     }
-    printf("Nombre de archivo a borrar %s \t Start: %ld \t End: %ld\n",fileNameTobeDeleted,fileTobeDeleated.start,fileTobeDeleated.end);
+    printf("Nombre de archivo a borrar %s \t Start: %lld \t End: %lld\n",fileNameTobeDeleted,fileTobeDeleated.start,fileTobeDeleated.end);
 
     deleteFileContentFromBody(tarFileName,fileTobeDeleated);//Elimina archivo del body del tar.
     deleteFileFromHeader(fileTobeDeleated);//Elimina el archivo del header.
@@ -636,11 +661,11 @@ void listStar(const char * tarFileName) {
         exit(1);
     }
 
-    if (header.fileList == NULL) {
-        fprintf(stderr, "La lista de archivos en el encabezado está vacía o no inicializada.\n");
-        close(tarFile);
-        exit(1);
-    }
+    // if (header.fileList == NULL) {
+    //     fprintf(stderr, "La lista de archivos en el encabezado está vacía o no inicializada.\n");
+    //     close(tarFile);
+    //     exit(1);
+    // }
     printf("\n \t LIST TAR FILES \n");
     printHeader();
     close(tarFile);
@@ -731,7 +756,7 @@ void append(const char * tarFileName,const char * fileName){
         header.fileList[espacioDisponible->index].size = fileStat.st_size;
         int tarFile = openFile(tarFileName,0);
         writeHeaderToTar(tarFile);//Escribir el header en el tar
-        printf("Size of tar antes de guardar el contenido del archivo nuevo %ld \n",lseek(tarFile, 0, SEEK_END));
+        printf("Size of tar antes de guardar el contenido del archivo nuevo %lld \n",lseek(tarFile, 0, SEEK_END));
         close(tarFile);
         writeFileContentToTar(tarFileName,fileName);//Escribir contenido del archivo en el tar.
         //Borrar espacio en blanco de la lista
@@ -741,22 +766,75 @@ void append(const char * tarFileName,const char * fileName){
     printHeader();
     calculateBlankSpaces(tarFileName);    
 }
+
+void extract(int numFiles, const char *tarFileName, const char *fileNames[]){
+    for (int i=0; i<numFiles; i++){
+        struct File fileToBeExtracted = findFile(tarFileName, fileNames[i]); // reads header
+        char* content = readContentFromTar(openFile(tarFileName, 0), fileToBeExtracted);
+
+        int extractedFile = openFile(fileToBeExtracted.fileName, 1); // New File
+        if (write(extractedFile, content, fileToBeExtracted.size) == -1){
+            perror("Error al escribir en el archivo de salida.");
+            free(content);
+            close(extractedFile);
+            exit(1);
+        }
+        printf("Archivo \"%s\" extraído en la carpeta de ejecución.\n", fileToBeExtracted.fileName);
+        free(content);
+        close(extractedFile);
+    }
+    //printHeader();
+
+}
+
+void extractAll(const char *tarFileName){
+    int tarFile = openFile(tarFileName,0);
+    if (readHeaderFromTar(tarFile)!=1){
+        printf("findFile: Error 1 al leer el header del tar file\n");
+        close(tarFile);
+        exit(10);
+    }
+    close (tarFile);
+
+    for (int i = 0; i < MAX_FILES; i++) {
+        if (header.fileList[i].size!=0){//Encontro el archivo
+            struct File fileToBeExtracted = header.fileList[i];
+            char* content = readContentFromTar(openFile(tarFileName, 0), fileToBeExtracted);
+
+            int extractedFile = openFile(fileToBeExtracted.fileName, 1); // New File
+            if (write(extractedFile, content, fileToBeExtracted.size) == -1){
+                perror("Error al escribir en el archivo de salida.");
+                free(content);
+                close(extractedFile);
+                exit(1);
+            }
+            printf("\nArchivo \"%s\" extraído en la carpeta de ejecución.\n", fileToBeExtracted.fileName);
+            free(content);
+            close(extractedFile);
+
+            struct stat fileStat;
+            if (lstat(fileToBeExtracted.fileName, &fileStat) == -1) {//Sacar info del archivo a guardar.
+                perror("append: Error al obtener información del archivo.\n");
+                exit(1);
+            }
+            printf("Tamanno del archivo nuevo: %lld\n", fileStat.st_size);
+        }
+    }
+    //printHeader();
+}
+
 int main(int argc, char *argv[]) {//!Modificar forma de usar las opciones
 //Debe poder usarse combinacion de opciones
     if (argc < 3) {
-        fprintf(stderr, "Uso: %s -c|-t <archivoTar> [archivos]\n", argv[0]);
+        fprintf(stderr, "Uso: %s -c|-t|-d|-r|-x <archivoTar> [archivos]\n", argv[0]);
         exit(1);
     }
 
     const char * opcion = argv[1];
     const char * archivoTar = argv[2];
 
-
-    if (strcmp(opcion, "-c") == 0){//* Create
-        if (argc < 4) {
-            fprintf(stderr, "Uso: %s -c <archivoTar> [archivos]\n", argv[0]);
-            exit(1);
-        }
+    //* Create
+    if (strcmp(opcion, "-c") == 0){
         int numFiles = argc - 3;
         const char * fileNames[MAX_FILES];
         for (int i = 0; i < numFiles; i++) {
@@ -764,19 +842,37 @@ int main(int argc, char *argv[]) {//!Modificar forma de usar las opciones
         }
         createStar(numFiles, archivoTar, fileNames);
 
-    } else if (strcmp(opcion, "-t") == 0){//* List
+    //* List
+    } else if (strcmp(opcion, "-t") == 0){
         listStar(archivoTar);
-
-    } else if (strcmp(opcion, "-d") == 0){//* Delete
+    
+    //* Delete
+    } else if (strcmp(opcion, "-d") ==0){
         const char * fileName;
         fileName = argv[0 + 3];//Sacar el nombre del archivo a borrar
         deleteFile(archivoTar,fileName);//Solo el primer archivo de la lista de archivos
-    }else if (strcmp(opcion,"-r")==0){//* Append
-    const char * fileName;
-        fileName = argv[0 + 3];//Sacar el nombre del archivo a borrar
+    
+    //* Append
+    }else if (strcmp(opcion,"-r")==0){
+        const char * fileName;
+        fileName = argv[0 + 3];//Sacar el nombre del archivo a agregar
         append(archivoTar,fileName);
+    
+    //* Extract
+    }else if (strcmp(opcion,"-x")==0) {
+        const char * fileNames[MAX_FILES];
+        if (argc == 3){ // Extract all
+            extractAll(archivoTar);
+        } else {
+            int numFiles = argc - 3;
+            for (int i = 0; i < numFiles; i++) {
+                fileNames[i] = argv[i + 3];
+            }
+            extract(numFiles, archivoTar, fileNames);
+        }
+
     }else{
-        fprintf(stderr, "Uso: %s -c|-t <archivoTar> [archivos]\n", argv[0]);
+        fprintf(stderr, "Uso: %s -c|-t|-d|-r|-x <archivoTar> [archivos]\n", argv[0]);
         exit(1);
     }
 
@@ -791,8 +887,9 @@ int main(int argc, char *argv[]) {//!Modificar forma de usar las opciones
         exit(1);
     }
 
+    printf("\n-------------------------------------------------------------------------");
     printf("\nEl tamaño del archivo tar es de: %ld bytes\n", (long)tamano);
+    printf("PROGRAMA TERMINA EXITOSAMENTE...\n");
     
-    printf("\n PROGRAMA TERMINA EXITOSAMENTE...\n");
     return 0;
 }
