@@ -214,9 +214,9 @@ char* readContentFromTar(int tarFile, struct File fileToRead){
 }
 
 /*
-    Funcion para encontrar la posicion de un archivo en el tar.
-    Retorna NULL si no encuentra el archivo en el tar.
-    Retorna el archivo encontrado la lista de archivos del header.
+    Funcion para encontrar un archivo en el tar.
+    Retorna un archivo.
+    Si lo encuentra, retorna el archivo encontrado. Si no, retorna un archivo con size=0.
 */
 struct File findFile(const char * tarFileName,const char * fileName){
     int tarFile = openFile(tarFileName,0);
@@ -233,8 +233,10 @@ struct File findFile(const char * tarFileName,const char * fileName){
         exit(10);
     }
     close(tarFile);
-    printf("findFile: Error 2 al leer el header del tar file\n");
-    exit(11);
+    printf("findFile: No se encuentra el archivo.\n");
+    struct File notFound;
+    notFound.size=0;
+    return notFound;
 }
 
 /*
@@ -424,6 +426,10 @@ void writeHeaderToTar(int tarFile){
 void writeFileContentToTar(const char * tarFileName,const char * fileName){//!Reemplazar por append
     int file = openFile(fileName,0);//Abre el archivo que se va a escribir en el tar
     struct File fileInfo = findFile(tarFileName,fileName);//Encuentra el archivo en el header
+    if (fileInfo.size==0){
+        printf("writeFileContentToTar: El archivo no se encuentra en el tar file\n");
+        exit(11);
+    }
     char buffer[fileInfo.size];//Buffer para guardar el contenido del archivo a guardar
     read(file,buffer, sizeof(buffer));//Lee el contenido del archivo y lo guarda en el buffer
     int tarFile = openFile(tarFileName,0);
@@ -688,8 +694,6 @@ struct BlankSpace * findBlankSpaceForNewFile(off_t sizeOfNewFile){
     return NULL;  // No se encontró espacio lo suficientemente grande
 }
 
-
-
 /* 
     Funcion para escribir contenido al final del archivo tar.
 */
@@ -767,9 +771,18 @@ void append(const char * tarFileName,const char * fileName){
     calculateBlankSpaces(tarFileName);    
 }
 
+/*
+    Función encargada de extraer los archivos especificados del tar.
+    Lee el contenido de cada archivo desde el tar y lo copia en un archivo
+    nuevo con el nombre del original.
+*/
 void extract(int numFiles, const char *tarFileName, const char *fileNames[]){
     for (int i=0; i<numFiles; i++){
         struct File fileToBeExtracted = findFile(tarFileName, fileNames[i]); // reads header
+        if (fileToBeExtracted.size==0){
+            printf("extract: El archivo no se encuentra en el tar file\n");
+            exit(11);
+        }
         char* content = readContentFromTar(openFile(tarFileName, 0), fileToBeExtracted);
 
         int extractedFile = openFile(fileToBeExtracted.fileName, 1); // New File
@@ -787,10 +800,14 @@ void extract(int numFiles, const char *tarFileName, const char *fileNames[]){
 
 }
 
+/*
+    Extrae el contenido de todos los archivos contenidos en el .tar.
+    Crea nuevos archivos con el contenido y nombre original del .tar.
+*/
 void extractAll(const char *tarFileName){
     int tarFile = openFile(tarFileName,0);
     if (readHeaderFromTar(tarFile)!=1){
-        printf("findFile: Error 1 al leer el header del tar file\n");
+        printf("extractAll: Error 1 al leer el header del tar file\n");
         close(tarFile);
         exit(10);
     }
@@ -821,6 +838,18 @@ void extractAll(const char *tarFileName){
         }
     }
     //printHeader();
+}
+
+/*
+    Actualiza el contenido de un archivo contenido en el .tar
+    Primero elimina el contenido original del archivo mencionado.
+    Luego, agrega el contenido nuevo del mismo archivo; su posición se modifica
+    según la función append.
+*/
+void update(const char *tarFileName, const char *fileToBeUpdatedName){
+    if (deleteFile(tarFileName, fileToBeUpdatedName) == 0){ // Valida y elimina el archivo a actualizar
+        append(tarFileName, fileToBeUpdatedName);
+    }
 }
 
 int main(int argc, char *argv[]) {//!Modificar forma de usar las opciones
@@ -863,13 +892,19 @@ int main(int argc, char *argv[]) {//!Modificar forma de usar las opciones
         const char * fileNames[MAX_FILES];
         if (argc == 3){ // Extract all
             extractAll(archivoTar);
-        } else {
+        } else { // Extract some
             int numFiles = argc - 3;
             for (int i = 0; i < numFiles; i++) {
                 fileNames[i] = argv[i + 3];
             }
             extract(numFiles, archivoTar, fileNames);
         }
+
+    //* Update
+    }else if (strcmp(opcion, "-u")==0){
+        const char * fileName;
+        fileName = argv[0 + 3];//Sacar el nombre del archivo a agregar
+        update(archivoTar,fileName);
 
     }else{
         fprintf(stderr, "Uso: %s -c|-t|-d|-r|-x <archivoTar> [archivos]\n", argv[0]);
