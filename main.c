@@ -289,6 +289,17 @@ struct File findNextFile(const char * file){
     return fileVacio;//No encontro el archivo file.
 }
 
+
+int isBlankSpaceRepeated(off_t start, off_t end){
+    struct BlankSpace * actual = firstBlankSpace;
+    while (actual!=NULL){
+        if (actual->start == start && actual->end == end)
+            return 1;
+        actual=actual->nextBlankSpace;
+    }
+    return 0;
+}
+
 /*
     Funcion para agregar un espacio vacio al BlankSpaceList.
     cabeza primer elemento de la lista de espacios en blanco.
@@ -296,7 +307,13 @@ struct File findNextFile(const char * file){
     end es el final del espacio en blanco.  
     retorna 1 si se agrega correctamente.
 */
-int addBlankSpace(struct BlankSpace** cabeza, off_t start, off_t end,int index){
+int addBlankSpace(struct BlankSpace ** cabeza, off_t start, off_t end,int index){
+    if (isBlankSpaceRepeated(start,end)==1){
+        printf("Espacio en blanco repetido start:%ld end:%ld\n",start,end);
+        return 0;
+    }   
+        
+
     if (start > end) {
         fprintf(stderr, "Error: El inicio del espacio en blanco es mayor que el final.\n");
         exit(1);
@@ -488,23 +505,28 @@ void createHeader(int numFiles,int tarFile, const char * fileNames[]){
 
 /*
     Funcion para calcular el espacio en blanco entre los archivos del tar.
-    !ERROR: Si se borra el penultimo y luego el ultimo archivo se fusionan los campos.
 */
 void calculateSpaceBetweenFilesAux(struct File lastFile,off_t sizeOfTar,const char * tarFileName){
     struct File nextFile;
     int indexLastFile = findIndexFile(tarFileName,lastFile.fileName);
     for (int i = 0; i < MAX_FILES ; i++ ){
         if (header.fileList[i].deleted == 1){//Esa posicion fue borrada con anterioridad.
-            if (i != MAX_FILES-1 && i!=0 ){//No es el ultimo archivo
-                if (header.fileList[i+1].start!=0)//El archivo siguiente no es el ultimo
+            if (i != MAX_FILES-1 && i != 0 ){//No es el ultimo archivo ni el primero
+                if (header.fileList[i+1].start != 0){//El archivo siguiente no es el ultimo
+                    printf("%i archivo fue eliminado, el siguiente no comienza en 0\n",i);
                     addBlankSpace(&firstBlankSpace, header.fileList[i-1].end , header.fileList[i+1].start , i );
-                else//No hay mas archivos
+                } else{//No hay mas archivos
+                    printf("no hay mas archivos\n");
                     addBlankSpace(&firstBlankSpace, header.fileList[i-1].end , sizeOfTar-1 , i );
+                }
             }else if (i==0){//Es el primer archivo
+                printf("Es el primer archivo\n");
                 addBlankSpace(&firstBlankSpace, sizeof(header) + 1 , header.fileList[i+1].start , 0 );
             }
         }else{
+            //printf("Archivo en index %i no ha sido borrado.\n",i);
             if (i < MAX_FILES-1 && (header.fileList[i+1].size>0) && (header.fileList[i].end != header.fileList[i+1].start)){//No es el ultimo
+                printf("No es el ultimo, el siguiente no empieza en 0 y start != end %i\n",i);
                 addBlankSpace(&firstBlankSpace, header.fileList[i].end , header.fileList[i+1].start , i );
             }
         }
