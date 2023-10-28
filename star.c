@@ -85,6 +85,9 @@ int openFile(const char * fileName,int opcion){
     }
 }
 
+/*
+    Función que devuelve el tamanno de un archivo
+*/
 off_t getFileSize(const char * fileName){
     int tarFile = openFile(fileName,0);
     off_t sizeOfTar = lseek(tarFile, 0, SEEK_END);// Obtiene el tamaño del archivo tar.
@@ -102,6 +105,18 @@ off_t getFileSize(const char * fileName){
     return sizeOfTar;
 }
 
+/*
+    Obtiene el tamano en bytes de la suma de los tamaños de los archivos contenidos en el tar.
+*/
+off_t getSizeOfContents(){
+    off_t totalSum = 0;
+    for (int i = 0; i < MAX_FILES; i++) {
+        if (header.fileList[i].size!=0){
+            totalSum += header.fileList[i].size;
+        }
+    }
+    return totalSum;
+}
 
 /*
     Funcion para guardar un archivo en el header.
@@ -109,7 +124,7 @@ off_t getFileSize(const char * fileName){
     CUIDADO: Solo guarda en posiciones NULL del array de Files. Revisa de principio a fin.
 */
 void addFileToHeaderFileList(struct File newFile) {
-    printf("ADD FILE TO HEADER FILE LIST\n");
+    printf("Adding \"%s\" to header's file list.\n", newFile.fileName);
     for (int i = 0; i < MAX_FILES; i++) {
         if (header.fileList[i].size==0){//Posicion vacia
             header.fileList[i]= newFile;
@@ -162,6 +177,47 @@ int sumFiles(){
     return numFiles;
 }
 
+/*
+    Retorna un arreglo con todos los archivos existentes.
+*/
+struct File * modifiedExistentFiles(int sumFiles){
+    struct File* modifiedFiles = (struct File*)malloc(sumFiles * sizeof(struct File));
+    int bytePosition = 0;
+    int selectedCount = 0;
+    for (int i = 0; i < MAX_FILES; i++) {
+        if (header.fileList[i].size != 0){
+            struct File modifiedFile = header.fileList[i];
+            //Nuevas posiciones
+            if (bytePosition == 0) modifiedFile.start = bytePosition = sizeof(header)+1;
+            else modifiedFile.start = currentPosition;
+            modifiedFile.end = currentPosition = modifiedFile.start + modifiedFile.size;
+            
+            modifiedFiles[selectedCount] = modifiedFile;
+            selectedCount++;
+        }
+    } 
+    return modifiedFiles;
+}
+
+/*
+    Cambia el tamaño de un archivo al tamaño indicado.
+*/
+void truncateFile(const char * fileName, off_t newSize){
+    int file = openFile(fileName, 0);
+    if (file == -1) {
+        perror("truncateFile: Error al abrir el archivo");
+        exit(1);
+    }
+
+    // Llama a ftruncate para cambiar el tamaño
+    if (ftruncate(file, newSize) == -1) {
+        perror("truncateFile: Error al cambiar el tamaño del archivo");
+        close(file);
+        exit(1);
+    }
+    close(file);
+}
+
 /*  
     Funcion para leer el Header del tar file.
     tarFile es el identificador del archivo tar de donde se debe leer el Header.
@@ -194,7 +250,7 @@ int readHeaderFromTar(int tarFile){
     Si hay error, retorna NULL
 */
 char* readContentFromTar(int tarFile, struct File fileToRead){
-    if(lseek(tarFile, fileToRead.start, SEEK_SET) == -1){
+    if(lseek(tarFile, fileToRead.start, SEEK_SET) == -1){ // Pone puntero del archivo tar al inicio del contenido a extraer.
         perror("readContentFromTar: Error al posicionar el puntero al principio del archivo a extraer.");
         close(tarFile);
         return NULL;
@@ -267,12 +323,13 @@ int findIndexFile(const char * tarFileName,const char * fileName){
     Funcion para imprimir el header.
 */
 void printHeader(){
-    printf("HEADER: \n");
+    printf("\nHEADER: \n");
     for (int i = 0; i < MAX_FILES; i++) {
         if (header.fileList[i].size !=  0) {
-            printf("\tArchivo: %s \t Index:%i \t Size: %lld \t Start: %lld \t End: %lld\n", header.fileList[i].fileName,i, header.fileList[i].size, header.fileList[i].start, header.fileList[i].end);
+            printf("File name: %s \t Index:%i \t Size: %lld \t Start: %lld \t End: %lld\n", header.fileList[i].fileName,i, header.fileList[i].size, header.fileList[i].start, header.fileList[i].end);
         }
     }
+    printf("\n");
 }
 
 /*
@@ -336,7 +393,7 @@ int isBlankSpaceRepeated(off_t start, off_t end){
 */
 int addBlankSpace(struct BlankSpace ** cabeza, off_t start, off_t end,int index){
     if (isBlankSpaceRepeated(start,end)==1){
-        printf("Espacio en blanco repetido start:%ld end:%ld\n",start,end);
+        printf("Espacio en blanco repetido start:%lld end:%lld\n",start,end);
         return 0;
     }   
         
@@ -375,9 +432,9 @@ int addBlankSpace(struct BlankSpace ** cabeza, off_t start, off_t end,int index)
         actual->nextBlankSpace = nuevoBlankSpace;
     }
     //Espacio en blanco agregado
-    printf("Se agrego espacio en blanco: Index=%i \t Start=%lld \t End=%lld\n",index,start,end);
     return 1;
 }
+
 /*
     Funcion para eliminar un espacio en blanco de la lista de espacio en blanco.
     targetIndex es el indice del espacio en blanco que se va a eliminar.
@@ -407,17 +464,33 @@ void deleteBlankSpace(int targetIndex) {
     printf("Se elimino espacio en blanco satisfactoriamente.\n");
 }
 
+/*
+    Reincia y limpia por completo la lista de espacios en blanco.
+*/
+void resetBlankSpaceList() {
+    struct BlankSpace * current = firstBlankSpace;
+    while (current != NULL) {
+        struct BlankSpace *next = current->nextBlankSpace;
+        free(current); // Libera la memoria del nodo actual
+        current = next;
+    }
+    firstBlankSpace = NULL; // Establece el puntero a NULL para indicar que la lista está vacía
+}
+
+
 void printBlankSpaces(){
-    printf("\nBlankSpaces: \n");
+    printf("\nBLANK SPACES: \n");
     struct BlankSpace * actual = firstBlankSpace;
     if (actual==NULL){
-        printf("\tNo hay espacios en blanco\n");
+        printf("There are no blank spaces\n");
         return;
     }
     while (actual != NULL) {
-        printf("\tBlankSpace: Start: %lld \t End: %lld\n", actual->start, actual->end);
+        printf("BlankSpace ->\tStart: %lld\tEnd: %lld\n", actual->start, actual->end);
         actual = actual->nextBlankSpace;
     }
+    printf("\n");
+
 }
 
 /*  
@@ -425,7 +498,7 @@ void printBlankSpaces(){
     tarFile es el numero del archivo tar. Debe estar abierto en modo escritura.
 */
 void writeHeaderToTar(int tarFile){
-    printf("WRITE HEADER TO TAR \n");
+    printf("\nWriting header to tar...\n");
     char headerBlock[sizeof(header)];//Donde se guarda el contenido del header para escribirlo en el tar
     memset(headerBlock, 0, sizeof(headerBlock));  // Inicializa el bloque con bytes nulos
     memcpy(headerBlock, &header, sizeof(header));// Copia el contenido de la estructura header en el headerBlock
@@ -448,7 +521,7 @@ void writeFileContentToTar(const char * tarFileName,const char * fileName){//!Re
         exit(11);
     }
     char buffer[fileInfo.size];//Buffer para guardar el contenido del archivo a guardar
-    read(file,buffer, sizeof(buffer));//Lee el contenido del archivo y lo guarda en el buffer
+    read(file,buffer, sizeof(buffer));//!!!!!!!!!!Lee el contenido del archivo y lo guarda en el buffer
     int tarFile = openFile(tarFileName,0);
     lseek(tarFile, fileInfo.start, SEEK_SET);//Coloca el puntero del tar donde de escribir.
 
@@ -468,7 +541,7 @@ void writeFileContentToTar(const char * tarFileName,const char * fileName){//!Re
     fileName es el nombre del archivo del cual se grabara el contenido en el body del tar.
 */
 void writeBodyToTar(const char * tarFileName,const char * fileNames[],int numFiles){
-    printf("WRITE BODY TO TAR \n");
+    printf("\nWriting body to tar...\n");
     for (int i=0;i<numFiles;i++){
         struct stat fileStat;
         if (lstat(fileNames[i], &fileStat) == -1) {//Extrae la info del archivo de esta iteracion y la guarda en fileStat
@@ -485,7 +558,6 @@ void writeBodyToTar(const char * tarFileName,const char * fileNames[],int numFil
     El archivo tar debe estar abierto en modo lectura y escritura.
 */
 void createBody(const char * tarFileName, const char *fileNames[],int numFiles){
-    printf("CREATE BODY\n");
     //Ver info del header para poder escribir el cuerpo
     int tarFile = openFile(tarFileName,0);
     if (readHeaderFromTar(tarFile)==1){
@@ -502,12 +574,12 @@ void createBody(const char * tarFileName, const char *fileNames[],int numFiles){
 /*
     Funcion para crear el encabezado del tar.
     numFiles es la cantidad de archivos que se van a empacar.
-    tarFileName es el nombre del archivo tar que se creara.
+    tarFile es el archivo tar que se creara.
     fileNames es un arreglo con los nombres de los archivos que se van a empacar
     retorna el tamanno del tar.
 */
 void createHeader(int numFiles,int tarFile, const char * fileNames[]){
-    printf("CREATE HEADER \n");
+    printf("\nCREATE HEADER\n");
 
     const char * fileName;
     struct stat fileStat;
@@ -544,20 +616,16 @@ void calculateSpaceBetweenFilesAux(struct File lastFile,off_t sizeOfTar,const ch
         if (header.fileList[i].deleted == 1){//Esa posicion fue borrada con anterioridad.
             if (i != MAX_FILES-1 && i != 0 ){//No es el ultimo archivo ni el primero
                 if (header.fileList[i+1].start != 0){//El archivo siguiente no es el ultimo
-                    printf("%i archivo fue eliminado, el siguiente no comienza en 0\n",i);
                     addBlankSpace(&firstBlankSpace, header.fileList[i-1].end , header.fileList[i+1].start , i );
                 } else{//No hay mas archivos
-                    printf("no hay mas archivos\n");
                     addBlankSpace(&firstBlankSpace, header.fileList[i-1].end , sizeOfTar-1 , i );
                 }
             }else if (i==0){//Es el primer archivo
-                printf("Es el primer archivo\n");
                 addBlankSpace(&firstBlankSpace, sizeof(header) + 1 , header.fileList[i+1].start , 0 );
             }
         }else{
             //printf("Archivo en index %i no ha sido borrado.\n",i);
             if (i < MAX_FILES-1 && (header.fileList[i+1].size>0) && (header.fileList[i].end != header.fileList[i+1].start)){//No es el ultimo
-                printf("No es el ultimo, el siguiente no empieza en 0 y start != end %i\n",i);
                 addBlankSpace(&firstBlankSpace, header.fileList[i].end , header.fileList[i+1].start , i );
             }
         }
@@ -569,7 +637,7 @@ void calculateSpaceBetweenFilesAux(struct File lastFile,off_t sizeOfTar,const ch
     Imprime los espacios en blanco cuando termina.
 */
 void calculateBlankSpaces(const char * tarFileName){
-    printf("CALCULATING BLANKSPACES\n");
+    printf("Calculating blank spaces...\n");
     off_t sizeOfTar = getFileSize(tarFileName);// Obtiene el tamaño del archivo tar.
     int tarFile = openFile(tarFileName, 0);// Abre el archivo para leer el header.
 
@@ -589,7 +657,7 @@ void calculateBlankSpaces(const char * tarFileName){
     numFiles es la cantidad de archivos que se van a empacar.
 */
 void createStar(int numFiles, const char *tarFileName, const char *fileNames[]){
-    printf("\n \t CREATE TAR FILE \n");
+    printf("\nCREATE TAR FILE \n");
     printf("Size of header: %ld\n",sizeof(header));
     if (numFiles > MAX_FILES){
         printf("createStar: Se excedio el numero maximo de archivos que se pueden empacar\n");
@@ -607,7 +675,7 @@ void createStar(int numFiles, const char *tarFileName, const char *fileNames[]){
 
 */
 int deleteFileFromHeader(struct File file){
-    printf("DELETE FILE FROM HEADER\n");
+    printf("Deleting file from header...\n");
     for (int i=0;i<MAX_FILES;i++){
         if (strcmp(header.fileList[i].fileName,file.fileName)==0){
             header.fileList[i].size=0;
@@ -626,7 +694,7 @@ int deleteFileFromHeader(struct File file){
     NO se modifica el tamanno del archivo tar.
 */
 void deleteFileContentFromBody(const char* tarFileName,struct File fileToBeDeleted) {
-    printf("DELETE FILE CONTENT FROM BODY\n");
+    printf("Deleting file from body...\n");
     FILE * archivo = fopen(tarFileName, "r+");
     if (archivo == NULL) {
         perror("deleteFileContentFromBody: Error al abrir el archivo");
@@ -655,14 +723,14 @@ void deleteFileContentFromBody(const char* tarFileName,struct File fileToBeDelet
     Retorna 0 si se elimino correctamente.
 */
 int deleteFile(const char * tarFileName,const char * fileNameTobeDeleted){
-    printf("\n \t DELETE FILE \n");
+    printf("\nDELETE FILE\n");
     int tarFile = openFile(tarFileName,0);
     struct File fileTobeDeleated = findFile(tarFileName,fileNameTobeDeleted);
     if (fileTobeDeleated.size==0){
         printf("deleteFile: El archivo no se encuentra en el tar file\n");
         exit(11);
     }
-    printf("Nombre de archivo a borrar %s \t Start: %lld \t End: %lld\n",fileNameTobeDeleted,fileTobeDeleated.start,fileTobeDeleated.end);
+    printf("File to be deleted: %s\tStart:%lld\tEnd: %lld\n",fileNameTobeDeleted,fileTobeDeleated.start,fileTobeDeleated.end);
 
     deleteFileContentFromBody(tarFileName,fileTobeDeleated);//Elimina archivo del body del tar.
     deleteFileFromHeader(fileTobeDeleated);//Elimina el archivo del header.
@@ -749,7 +817,22 @@ void writeAtTheEndOfTar(const char * tarFileName ,const char * fileName){
     close(tarFile);
     printf("Se agrego archivo satisfactoriamente.\n");
 }
-    
+
+/*
+    Reincia el header para que pierda todos sus valores.
+*/
+void resetHeader() {
+    for (int i = 0; i < MAX_FILES; i++) {
+        memset(header.fileList[i].fileName, 0, MAX_FILENAME_LENGTH); // Establece el nombre del archivo a una cadena vacía
+        header.fileList[i].mode = 0; // Establece el modo a 0 (u otro valor por defecto)
+        header.fileList[i].size = 0; // Establece el tamaño a 0
+        header.fileList[i].start = 0; // Establece la posición de inicio a 0
+        header.fileList[i].end = 0; // Establece la posición de fin a 0
+        header.fileList[i].deleted = 0; // Establece el indicador de eliminado a 0 (no eliminado)
+    }
+}
+
+
 /*
     Funcion encargada de agregar el contenido de fileName 
     en el tar. Debe buscar espacio disponible.
@@ -758,7 +841,7 @@ void writeAtTheEndOfTar(const char * tarFileName ,const char * fileName){
     No debeutilizar ningún archivo auxiliar para hacer crecer el archivo.
 */
 void append(const char * tarFileName,const char * fileName){
-    printf("\n \t APPEND\n");
+    printf("\nAPPEND\n");
     if (sumFiles() >= MAX_FILES){
         printf("Cantidad maxima de archivos alcanzada.\n");
         exit(1);
@@ -814,11 +897,11 @@ void extract(int numFiles, const char *tarFileName, const char *fileNames[]){
             close(extractedFile);
             exit(1);
         }
-        printf("Archivo \"%s\" extraído en la carpeta de ejecución.\n", fileToBeExtracted.fileName);
+        printf("File \"%s\" extracted in execution directory.\n", fileToBeExtracted.fileName);
         free(content);
         close(extractedFile);
     }
-    //printHeader();
+    printHeader();
 
 }
 
@@ -874,10 +957,76 @@ void update(const char *tarFileName, const char *fileToBeUpdatedName){
     }
 }
 
+/*
+    Devuelve una cadena de caracteres única con todos los contenidos válidos
+    en el body del tar.
+    Recibe un entero y lo modifica para indicar la cantidad de archivos reales iterados.
+*/
+char * getWholeBodyContentInfo(const char * tarFileName, int * filesSum){
+    char * wholeContent = (char*)malloc(getSizeOfContents());
+    char * content;
+    for (int i=0; i < MAX_FILES; i++){
+        if (header.fileList[i].size!=0){
+            (*filesSum) += 1;
+            content = readContentFromTar(openFile(tarFileName, 0), header.fileList[i]);
+            strcat(wholeContent, content);
+        }
+    }
+    free(content);
+    return wholeContent;
+}
+
+/*
+    Defragmenta el archivo: elimina los espacios en blancos y comprime el contenido.
+*/
+void pack(const char * tarFileName){
+    int tarFile = openFile(tarFileName,0);
+    if (readHeaderFromTar(tarFile)!=1){ // Read header from tar
+        printf("extractAll: Error 1 al leer el header del tar file\n");
+        close(tarFile);
+        exit(10);
+    }
+    close (tarFile);
+    calculateBlankSpaces(tarFileName); // Calcular espacios en blanco
+
+    printf("\nPACK\n");
+    
+    int sumFiles = 0;
+    char * bodyContentBuffer = getWholeBodyContentInfo(tarFileName, &sumFiles); // cadena de caracteres con todos los contenidos de forma secuencial.
+    struct File * modifiedFiles = modifiedExistentFiles(sumFiles); // archivos existentes con sus bytes de posicion modificados.
+    resetHeader(); // reinica el header para poner la nueva información por completo.
+    
+    for (int j=0; j<sumFiles; j++){
+        addFileToHeaderFileList(modifiedFiles[j]);
+    }
+    tarFile = openFile(tarFileName,0);
+    writeHeaderToTar(tarFile); // Reescribir header en el archivo.
+    close(tarFile);
+
+    truncateFile(tarFileName, sizeof(header)); // Deja solo el header en el archivo .tar
+
+    tarFile = openFile(tarFileName, 0);
+    if (lseek(tarFile, 0, SEEK_END) == -1) { // Mover el puntero del archivo al final del archivo .tar
+        perror("pack: Error al mover el puntero al final del archivo .tar");
+        close(tarFile);
+        exit(1);
+    }
+    // Escribir el contenido almacenado en bodyContentBuffer al final del archivo .tar
+    if (write(tarFile, bodyContentBuffer, strlen(bodyContentBuffer)) == -1) {
+        perror("pack: Error al escribir el contenido en el archivo .tar");
+        close(tarFile);
+        exit(1);
+    }
+    close(tarFile);
+
+    resetBlankSpaceList(); // Reiniciar lista de espacios en blanco.
+
+    printHeader();
+    printBlankSpaces();
+}
 int main(int argc, char *argv[]) {//!Modificar forma de usar las opciones
-//Debe poder usarse combinacion de opciones
     if (argc < 3) {
-        fprintf(stderr, "Uso: %s -c|-t|-d|-r|-x <archivoTar> [archivos]\n", argv[0]);
+        fprintf(stderr, "Use: %s -c|-t|-d|-r|-x|-u|-p <tarFile.tar> [files]\n", argv[0]);
         exit(1);
     }
 
@@ -928,6 +1077,9 @@ int main(int argc, char *argv[]) {//!Modificar forma de usar las opciones
         fileName = argv[0 + 3];//Sacar el nombre del archivo a agregar
         update(archivoTar,fileName);
 
+    }else if (strcmp(opcion, "-p")==0){
+        pack(archivoTar);
+
     }else{
         fprintf(stderr, "Uso: %s -c|-t|-d|-r|-x <archivoTar> [archivos]\n", argv[0]);
         exit(1);
@@ -936,17 +1088,17 @@ int main(int argc, char *argv[]) {//!Modificar forma de usar las opciones
     
     // Usa la función lseek para mover el puntero al final del archivo
     int tarFile = openFile(archivoTar,0);
-    off_t tamano = lseek(tarFile, 0, SEEK_END);
+    off_t size = lseek(tarFile, 0, SEEK_END);
 
-    if (tamano == -1) {
+    if (size == -1) {
         perror("main: Error al obtener el tamaño del archivo tar.");
         close(tarFile);
         exit(1);
     }
 
-    printf("\n-------------------------------------------------------------------------");
-    printf("\nEl tamaño del archivo tar es de: %ld bytes\n", (long)tamano);
-    printf("PROGRAMA TERMINA EXITOSAMENTE...\n");
+    printf("\n----------------------------------------------------\n");
+    printf("\nSize of tar file is of: %ld bytes.", (long)size);
+    printf("\nPROGRAM ENDS SUCCESSFULLY\n");
     
     return 0;
 }
