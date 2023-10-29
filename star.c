@@ -219,7 +219,6 @@ void truncateFile(const char * fileName, off_t newSize){
     NO cierra el archivo tar.
 */
 int readHeaderFromTar(int tarFile){
-    //printf("READ HEADER FROM TAR \n");
     if (lseek(tarFile, 0, SEEK_SET) == -1) {
         perror("readHeaderFromTar: Error al posicionar el puntero al principio del archivo");
         close(tarFile);
@@ -386,7 +385,6 @@ int isBlankSpaceRepeated(off_t start, off_t end){
 */
 int addBlankSpace(struct BlankSpace ** cabeza, off_t start, off_t end,int index){
     if (isBlankSpaceRepeated(start,end)==1){
-        printf("Espacio en blanco repetido start:%lld end:%lld\n",start,end);
         return 0;
     }   
     if (start > end) {
@@ -414,7 +412,8 @@ int addBlankSpace(struct BlankSpace ** cabeza, off_t start, off_t end,int index)
     } else {//Lista con elementos
         struct BlankSpace * actual = firstBlankSpace;
         //Itera mientras haya siguiente y el index del nuevo sea mayor o igual que el actual
-        while ((actual->nextBlankSpace != NULL) && (actual->nextBlankSpace->index <= nuevoBlankSpace->index)) {
+        while ((actual->nextBlankSpace != NULL) &&
+        (actual->nextBlankSpace->index <= nuevoBlankSpace->index)) {
             actual = actual->nextBlankSpace;
         }
         //Cuando se sale del ciclo es porque o llega al final de la lista
@@ -488,7 +487,7 @@ void printBlankSpaces(){
     tarFile es el numero del archivo tar. Debe estar abierto en modo escritura.
 */
 void writeHeaderToTar(int tarFile){
-    printf("\nWriting header to tar...\n");
+    printf("Writing header to tar...\n");
     char headerBlock[sizeof(header)];//Donde se guarda el contenido del header para escribirlo en el tar
     memset(headerBlock, 0, sizeof(headerBlock));  // Inicializa el bloque con bytes nulos
     memcpy(headerBlock, &header, sizeof(header));// Copia el contenido de la estructura header en el headerBlock
@@ -531,7 +530,7 @@ void writeFileContentToTar(const char * tarFileName,const char * fileName){//!Re
     fileName es el nombre del archivo del cual se grabara el contenido en el body del tar.
 */
 void writeBodyToTar(const char * tarFileName,const char * fileNames[],int numFiles){
-    printf("\nWriting body to tar...\n");
+    printf("Writing body to tar...\n");
     for (int i=0;i<numFiles;i++){
         struct stat fileStat;
         if (lstat(fileNames[i], &fileStat) == -1) {//Extrae la info del archivo de esta iteracion y la guarda en fileStat
@@ -739,13 +738,11 @@ void listStar(const char * tarFileName) {
         fprintf(stderr, "listStar: Error al abrir el archivo TAR.\n");
         exit(1);
     }
-    if (readHeaderFromTar(tarFile)==1)
+    if (readHeaderFromTar(tarFile)!=1){
         printf("listStar: Se leyó el Header correctamente\n");
-    else{
-        printf("listStar: Error al leer el header del tar file\n");
         exit(1);
     }
-    printf("\n \t LIST TAR FILES \n");
+    printf("\nLIST TAR FILES\n");
     printHeader();
     close(tarFile);
 }
@@ -798,7 +795,6 @@ void writeAtTheEndOfTar(const char * tarFileName ,const char * fileName){
     }
     close(file);
     close(tarFile);
-    printf("Se agrego archivo satisfactoriamente.\n");
 }
 
 /*
@@ -854,7 +850,6 @@ void append(const char * tarFileName,const char * fileName){
         //Borrar espacio en blanco de la lista
         deleteBlankSpace(espacioDisponible->index);
     }
-    printf("Header despues del append.\n");
     printHeader();
     calculateBlankSpaces(tarFileName);    
 }
@@ -911,7 +906,7 @@ void extractAll(const char *tarFileName){
                 close(extractedFile);
                 exit(1);
             }
-            printf("\nArchivo \"%s\" extraído en la carpeta de ejecución.\n", fileToBeExtracted.fileName);
+            printf("File \"%s\" extracted in execution directory.\n", fileToBeExtracted.fileName);
             free(content);
             close(extractedFile);
             struct stat fileStat;
@@ -919,7 +914,6 @@ void extractAll(const char *tarFileName){
                 perror("append: Error al obtener información del archivo.\n");
                 exit(1);
             }
-            printf("Tamanno del archivo nuevo: %lld\n", fileStat.st_size);
         }
     }
 }
@@ -968,8 +962,7 @@ void pack(const char * tarFileName){
     close (tarFile);
     calculateBlankSpaces(tarFileName); // Calcular espacios en blanco
 
-    printf("\nPACK\n");
-    
+    printf("PACK\n");
     int sumFiles = 0;
     char * bodyContentBuffer = getWholeBodyContentInfo(tarFileName, &sumFiles); // cadena de caracteres con todos los contenidos de forma secuencial.
     struct File * modifiedFiles = modifiedExistentFiles(sumFiles); // archivos existentes con sus bytes de posicion modificados.
@@ -1009,7 +1002,6 @@ int main(int argc, char *argv[]) {//!Modificar forma de usar las opciones
     // Recorrer cada carácter de la opción
     for (int i = 1; i < strlen(opcion); i++) {
         char opt = opcion[i];
-        printf("%c\n",opt);
         if (opt == 'c'){//* Create
             int numFiles = argc - 3;
             const char * fileNames[MAX_FILES];
@@ -1065,9 +1057,9 @@ int main(int argc, char *argv[]) {//!Modificar forma de usar las opciones
         exit(1);
     }
 
-    printf("\n----------------------------------------------------\n");
-    printf("\nSize of tar file is of: %ld bytes.", (long)size);
-    printf("\nPROGRAM ENDS SUCCESSFULLY\n");
+    printf("----------------------------------------------------\n");
+    printf("Size of tar file is of: %ld bytes.\n", (long)size);
+    printf("PROGRAM ENDS SUCCESSFULLY\n");
     
     return 0;
 }
