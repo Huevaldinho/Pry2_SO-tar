@@ -1,3 +1,4 @@
-run
-archivoSalida.tar
-archivoSalida.tar
+.vscode
+makefile
+out.tar
+star
